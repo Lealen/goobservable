@@ -29,7 +29,7 @@ func AddTemplate(name, src string) {
 
 func Run() {
 	// data = v
-
+	defineVariables()
 	runTemplate("main")
 	Tick()
 }
@@ -50,26 +50,30 @@ func Tick() {
 			// if there is a goob-data defined: pass a data related to it to template defined in goob-bind: //TODO: maybe try to understand if someone want to pass a defined value in array/slice/map or smth?
 			if every.Index(i).Call("hasAttribute", goobData).Bool() {
 				dataname := every.Index(i).Call("getAttribute", goobData).String()
-				if dat, ok := data[dataname]; ok {
+				if dat, ok := Data[dataname]; ok {
 					//if goob-foreach is defined, then rather than try to pass a data to template, we need to pass each element to different templates and renders it inside
 					if every.Index(i).Call("hasAttribute", goobForeach).Bool() {
-						valueArray := reflect.ValueOf(data[dataname])
+						valueArray := reflect.ValueOf(Data[dataname])
 
 						switch valueArray.Kind() {
 						case reflect.Array, reflect.Slice, reflect.String:
 							for j := 0; j < valueArray.Len(); j++ {
-								err = tmpl.ExecuteTemplate(&buf, templatename, valueArray.Index(j).Interface())
-								if err != nil {
-									println(err)
+								if foreachExpressionCheck(every.Index(i), valueArray.Index(j)) {
+									err = tmpl.ExecuteTemplate(&buf, templatename, valueArray.Index(j).Interface())
+									if err != nil {
+										println(err)
+									}
 								}
 								buf.WriteString("<div style=\"display:none;\" goob-index></div>")
 							}
 						case reflect.Map:
 							allkeys := valueArray.MapKeys()
 							for _, v := range allkeys {
-								err = tmpl.ExecuteTemplate(&buf, templatename, valueArray.MapIndex(v).Interface())
-								if err != nil {
-									println(err)
+								if foreachExpressionCheck(every.Index(i), valueArray.MapIndex(v)) {
+									err = tmpl.ExecuteTemplate(&buf, templatename, valueArray.MapIndex(v).Interface())
+									if err != nil {
+										println(err)
+									}
 								}
 								buf.WriteString("<div style=\"display:none;\" " + goobIndex + "=\"" + fmt.Sprintf("%v", v) + "\"></div>")
 							}
@@ -83,16 +87,27 @@ func Tick() {
 					err = fmt.Errorf("Could not found data %s to pass to template %s!", every.Index(i).Call("getAttribute", goobData).String(), every.Index(i).Call("getAttribute", goobBind).String())
 				}
 			} else {
-				err = tmpl.ExecuteTemplate(&buf, templatename, data)
+				err = tmpl.ExecuteTemplate(&buf, templatename, Data)
 			}
 
 			if err != nil {
 				println(err)
-				continue
+				// continue
 			}
 
 			every.Index(i).Set("innerHTML", buf.String())
 			every.Index(i).Call("setAttribute", goobProcessed, "")
+		}
+	}
+
+	for {
+		every := js.Global.Get("document").Call("querySelectorAll", "["+goobIfExpression+"]:not(["+goobIfExpressionProcessed+"])")
+		if every.Length() == 0 {
+			break
+		}
+		for i := 0; i < every.Length(); i++ {
+			variablename := every.Index(i).Call("getAttribute", goobIfVar).String()
+			checkOneExpression(reflect.ValueOf(Data[variablename]), every.Index(i))
 		}
 	}
 }
@@ -108,7 +123,7 @@ func Debug() {
 
 func runTemplate(name string) {
 	var buf bytes.Buffer
-	err := tmpl.ExecuteTemplate(&buf, name, data)
+	err := tmpl.ExecuteTemplate(&buf, name, Data)
 	if err != nil {
 		println(err)
 		return

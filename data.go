@@ -4,34 +4,163 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+	"strconv"
+	"strings"
 
 	"github.com/gopherjs/gopherjs/js"
 	"github.com/gopherjs/jsbuiltin"
 )
 
-var data = make(map[string]interface{})
+var Data = make(map[string]interface{})
+
+func DebugData() {
+	println(strings.Replace(fmt.Sprintf("%#v", Data), ",", ",\n", -1))
+}
+
+func expressionApply(obj *js.Object, trueorfalse bool) {
+	todo := ""
+
+	//TODO: optymalize this code, so it wont run every time a variable change, we can just do it when expresion changes, but anyway... it works I suppose?
+
+	if trueorfalse {
+		if jsbuiltin.TypeOf(obj.Get("hasAttribute")) == "function" && obj.Call("hasAttribute", goobIfTrue).Bool() {
+			todo = obj.Call("getAttribute", goobIfTrue).String()
+		}
+	} else {
+		if jsbuiltin.TypeOf(obj.Get("hasAttribute")) == "function" && obj.Call("hasAttribute", goobIfFalse).Bool() {
+			todo = obj.Call("getAttribute", goobIfFalse).String()
+		}
+	}
+
+	if todo != "" {
+		arr := strings.Split(todo, ";")
+		for _, v := range arr {
+			arr2 := strings.Split(v, " ")
+			switch arr2[0] {
+			case "addclass":
+				for k, v2 := range arr2 {
+					if k == 0 {
+						continue
+					}
+					obj.Get("classList").Call("add", v2)
+				}
+			case "removeclass":
+				for k, v2 := range arr2 {
+					if k == 0 {
+						continue
+					}
+					obj.Get("classList").Call("remove", v2)
+				}
+			}
+		}
+	}
+}
+
+func convertToInt64(value reflect.Value) int64 {
+	switch value.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return value.Int()
+	}
+	println("Warning: trying to convert type " + value.Kind().String() + " to type int64!")
+	return 0
+}
+
+func checkOneExpression(value reflect.Value, ei *js.Object) {
+	switch value.Kind() {
+	case reflect.Bool:
+		expressionApply(ei, value.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		number := convertToInt64(value)
+		exp := ei.Call("getAttribute", goobIfExpression).String()
+		exparr := strings.Split(exp, " ")
+		if len(exparr) != 2 {
+			println("Warning: wrong expression: " + exp)
+		} else {
+			number2, err := strconv.ParseInt(exparr[1], 10, 64)
+			if err != nil {
+				println("Warning: error parsing int: " + exparr[1])
+			}
+			// println(fmt.Sprintf("%d %d", number, number2))
+			switch exparr[0] {
+			case "eq":
+				expressionApply(ei, number == number2)
+			case "ne":
+				expressionApply(ei, number != number2)
+			case "lt":
+				expressionApply(ei, number < number2)
+			case "le":
+				expressionApply(ei, number <= number2)
+			case "gt":
+				expressionApply(ei, number > number2)
+			case "ge":
+				expressionApply(ei, number >= number2)
+			}
+		}
+	}
+
+	ei.Call("setAttribute", goobIfExpressionProcessed, "")
+}
+
+func checkExpressions(name string) {
+	//CHECK EXPRESSIONS ON DOCUMENT:
+
+	value := reflect.ValueOf(Data[name])
+
+	every := js.Global.Get("document").Call("querySelectorAll", "["+goobIfVar+"=\""+name+"\"]")
+	for i := 0; i < every.Length(); i++ {
+		checkOneExpression(value, every.Index(i))
+	}
+}
+
+func foreachExpressionCheck(ei *js.Object, valueA reflect.Value) bool {
+	if jsbuiltin.TypeOf(ei.Get("hasAttribute")) == "function" && ei.Call("hasAttribute", goobForeachIf).Bool() {
+		if valueA.Kind() != reflect.Struct {
+			println("goob-foreach-if for not-structs are not supported yet")
+			return false
+		}
+
+		ifele := ei.Call("getAttribute", goobForeachIf).String()
+		ifelearr := strings.Split(ifele, " ")
+
+		if len(ifelearr) == 0 {
+			return true
+		} else if len(ifelearr) == 1 {
+			ifelearr = append(ifelearr, "")
+		}
+
+		element := valueA.FieldByName(ifelearr[0])
+
+		if fmt.Sprintf("%v", element.Interface()) == strings.Join(ifelearr[1:], " ") {
+			return true
+		}
+		return false
+	}
+	return true
+}
 
 func Get(name string) interface{} {
-	return data[name]
+	return Data[name]
 }
 
 func Set(name string, value interface{}) {
-	data[name] = value
+	Data[name] = value
 
 	//UPDATE ON DOCUMENT:
 	every := js.Global.Get("document").Call("querySelectorAll", "["+goobData+"=\""+name+"\"], ["+goobWatch+"=\""+name+"\"]")
 	for i := 0; i < every.Length(); i++ {
 		every.Index(i).Call("removeAttribute", goobProcessed)
 	}
+
 	Tick()
+	checkExpressions(name)
 }
 
 func GetIndex(name string, index interface{}) interface{} {
-	if _, ok := data[name]; !ok {
+	if _, ok := Data[name]; !ok {
 		return nil
 	}
 
-	valueArray := reflect.ValueOf(data[name])
+	valueArray := reflect.ValueOf(Data[name])
 	valueIndex := reflect.ValueOf(index)
 
 	switch valueArray.Kind() {
@@ -48,11 +177,11 @@ func GetIndex(name string, index interface{}) interface{} {
 }
 
 func SetIndex(name string, index, value interface{}) (interface{}, error) {
-	if _, ok := data[name]; !ok {
+	if _, ok := Data[name]; !ok {
 		return nil, fmt.Errorf("You need to define string/array/slice/map first")
 	}
 
-	valueArray := reflect.ValueOf(data[name])
+	valueArray := reflect.ValueOf(Data[name])
 	valueIndex := reflect.ValueOf(index)
 	valueA := reflect.ValueOf(value)
 
@@ -62,13 +191,13 @@ func SetIndex(name string, index, value interface{}) (interface{}, error) {
 
 	if valueArray.Kind() == reflect.Map {
 		valueArray.SetMapIndex(valueIndex, valueA)
-		data[name] = valueArray.Interface()
+		Data[name] = valueArray.Interface()
 	} else {
 		if valueArray.Len() <= int(valueIndex.Int()) {
 			return nil, fmt.Errorf("Index out of range.")
 		}
 		valueArray.Index(int(valueIndex.Int())).Set(valueA)
-		data[name] = valueArray.Interface()
+		Data[name] = valueArray.Interface()
 	}
 
 	//UPDATE ON DOCUMENT:
@@ -88,9 +217,12 @@ func SetIndex(name string, index, value interface{}) (interface{}, error) {
 		}
 
 		var buf bytes.Buffer
-		err := tmpl.ExecuteTemplate(&buf, every.Index(i).Call("getAttribute", goobBind).String(), value)
-		if err != nil {
-			println(err)
+		var err error
+		if foreachExpressionCheck(every.Index(i), valueA) {
+			err = tmpl.ExecuteTemplate(&buf, every.Index(i).Call("getAttribute", goobBind).String(), value)
+			if err != nil {
+				println(err)
+			}
 		}
 
 		wheretoadd := "beforeend"
@@ -138,20 +270,20 @@ func SetIndex(name string, index, value interface{}) (interface{}, error) {
 
 //Push is pushing value at the end of slice or string
 func Push(name string, value interface{}) (interface{}, error) {
-	if _, ok := data[name]; !ok {
+	if _, ok := Data[name]; !ok {
 		return nil, fmt.Errorf("You need to define slice first")
 	}
 
-	valueArray := reflect.ValueOf(data[name])
+	valueArray := reflect.ValueOf(Data[name])
 	valueA := reflect.ValueOf(value)
 
 	switch valueArray.Kind() {
 	case reflect.Slice:
-		data[name] = reflect.Append(valueArray, valueA).Interface()
+		Data[name] = reflect.Append(valueArray, valueA).Interface()
 	case reflect.String:
 		switch valueA.Kind() {
 		case reflect.String:
-			data[name] = valueArray.String() + valueA.String()
+			Data[name] = valueArray.String() + valueA.String()
 		default:
 			return nil, fmt.Errorf("Value needs to be a type of string.")
 		}
@@ -163,9 +295,11 @@ func Push(name string, value interface{}) (interface{}, error) {
 	every := js.Global.Get("document").Call("querySelectorAll", "["+goobData+"=\""+name+"\"]["+goobForeach+"]")
 	for i := 0; i < every.Length(); i++ {
 		var buf bytes.Buffer
-		err := tmpl.ExecuteTemplate(&buf, every.Index(i).Call("getAttribute", goobBind).String(), value)
-		if err != nil {
-			println(err)
+		if foreachExpressionCheck(every.Index(i), valueA) {
+			err := tmpl.ExecuteTemplate(&buf, every.Index(i).Call("getAttribute", goobBind).String(), value)
+			if err != nil {
+				println(err)
+			}
 		}
 
 		buf.WriteString("<div style=\"display:none;\" " + goobIndex + "></div>")
@@ -177,7 +311,7 @@ func Push(name string, value interface{}) (interface{}, error) {
 	}
 	Tick()
 
-	return data[name], nil
+	return Data[name], nil
 }
 
 // TODO
@@ -200,11 +334,11 @@ func Push(name string, value interface{}) (interface{}, error) {
 // }
 
 func InsertAt(name string, index int, value interface{}) (interface{}, error) {
-	if _, ok := data[name]; !ok {
+	if _, ok := Data[name]; !ok {
 		return nil, fmt.Errorf("You need to define slice first")
 	}
 
-	valueArray := reflect.ValueOf(data[name])
+	valueArray := reflect.ValueOf(Data[name])
 	valueA := reflect.ValueOf(value)
 
 	switch valueArray.Kind() {
@@ -212,11 +346,11 @@ func InsertAt(name string, index int, value interface{}) (interface{}, error) {
 		valueArray = reflect.Append(valueArray, valueA)
 		reflect.Copy(valueArray.Slice(index+1, valueArray.Len()), valueArray.Slice(index, valueArray.Len()-1))
 		valueArray.Index(index).Set(valueA)
-		data[name] = valueArray.Interface()
+		Data[name] = valueArray.Interface()
 	case reflect.String:
 		switch valueA.Kind() {
 		case reflect.String:
-			data[name] = valueArray.Slice(0, index).String() + valueA.String() + valueArray.Slice(index, valueArray.Len()).String()
+			Data[name] = valueArray.Slice(0, index).String() + valueA.String() + valueArray.Slice(index, valueArray.Len()).String()
 		default:
 			return nil, fmt.Errorf("Value needs to be a type of string.")
 		}
@@ -238,9 +372,11 @@ func InsertAt(name string, index int, value interface{}) (interface{}, error) {
 		}
 
 		var buf bytes.Buffer
-		err := tmpl.ExecuteTemplate(&buf, every.Index(i).Call("getAttribute", goobBind).String(), value)
-		if err != nil {
-			println(err)
+		if foreachExpressionCheck(every.Index(i), valueA) {
+			err := tmpl.ExecuteTemplate(&buf, every.Index(i).Call("getAttribute", goobBind).String(), value)
+			if err != nil {
+				println(err)
+			}
 		}
 
 		buf.WriteString("<div style=\"display:none;\" " + goobIndex + "></div>")
@@ -252,21 +388,21 @@ func InsertAt(name string, index int, value interface{}) (interface{}, error) {
 	}
 	Tick()
 
-	return data[name], nil
+	return Data[name], nil
 }
 
 //TODO: map
 func RemoveAt(name string, index int) (interface{}, error) {
-	if _, ok := data[name]; !ok {
+	if _, ok := Data[name]; !ok {
 		return nil, fmt.Errorf("You need to define slice first")
 	}
 
-	valueArray := reflect.ValueOf(data[name])
+	valueArray := reflect.ValueOf(Data[name])
 
 	switch valueArray.Kind() {
 	case reflect.Slice:
 		valueArray = reflect.AppendSlice(valueArray.Slice(0, index), valueArray.Slice(index+1, valueArray.Len()))
-		data[name] = valueArray.Interface()
+		Data[name] = valueArray.Interface()
 	default:
 		return nil, fmt.Errorf("Type isnt slice.")
 	}
@@ -295,20 +431,32 @@ func RemoveAt(name string, index int) (interface{}, error) {
 	}
 	Tick()
 
-	return data[name], nil
+	return Data[name], nil
+}
+
+func Pop(name string) (interface{}, error) {
+	if _, ok := Data[name]; !ok {
+		return nil, fmt.Errorf("You need to define slice first")
+	}
+	//TODO: add outputing last element
+
+	valueArray := reflect.ValueOf(Data[name])
+
+	_, err := RemoveAt(name, valueArray.Len()-1)
+	return nil, err
 }
 
 //TODO: map
 func Empty(name string) (interface{}, error) {
-	if _, ok := data[name]; !ok {
+	if _, ok := Data[name]; !ok {
 		return nil, fmt.Errorf("You need to define slice first")
 	}
 
-	valueArray := reflect.ValueOf(data[name])
+	valueArray := reflect.ValueOf(Data[name])
 
 	switch valueArray.Kind() {
 	case reflect.Slice:
-		data[name] = valueArray.Slice(0, 0).Interface()
+		Data[name] = valueArray.Slice(0, 0).Interface()
 	default:
 		return nil, fmt.Errorf("Type isnt slice.")
 	}
@@ -320,5 +468,5 @@ func Empty(name string) (interface{}, error) {
 	}
 	Tick()
 
-	return data[name], nil
+	return Data[name], nil
 }

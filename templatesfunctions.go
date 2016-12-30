@@ -17,6 +17,11 @@ func getTypeFunc(i interface{}) string {
 	return reflect.TypeOf(i).String()
 }
 
+//package specified:
+func getGlobalFunc() map[string]interface{} {
+	return Data
+}
+
 //Generic:
 
 func logFunc(str string) string {
@@ -55,6 +60,11 @@ func getFromMemoryBankFunc(tmb TemplateMemoryBank, key interface{}) interface{} 
 }
 
 //Conversions:
+
+func derefFunc(a interface{}) interface{} {
+	valueA := reflect.ValueOf(a)
+	return reflect.Indirect(valueA)
+}
 
 func doNotParseFunc(in string) template.HTML {
 	return template.HTML(in)
@@ -264,9 +274,11 @@ func setIndexFunc(array, index, a interface{}) (interface{}, error) {
 	valueIndex := reflect.ValueOf(index)
 	valueA := reflect.ValueOf(a)
 
+	valueA.Pointer()
+
 	switch valueArray.Kind() {
 	case reflect.Array, reflect.Slice, reflect.String:
-		if valueArray.Len() > int(valueIndex.Int()) {
+		if valueArray.Len() <= int(valueIndex.Int()) {
 			return nil, fmt.Errorf("Index out of range.")
 		}
 		valueArray.Elem().Field(int(valueIndex.Int())).Set(valueA)
@@ -285,7 +297,7 @@ func getIndexFunc(array, index interface{}) (interface{}, error) {
 
 	switch valueArray.Kind() {
 	case reflect.Array, reflect.Slice, reflect.String:
-		if valueArray.Len() > int(valueIndex.Int()) {
+		if valueArray.Len() <= int(valueIndex.Int()) {
 			return nil, fmt.Errorf("Index out of range.")
 		}
 		return valueArray.Index(int(valueIndex.Int())), nil
