@@ -103,8 +103,7 @@ var funcMap = template.FuncMap{
 }
 
 func RegisterTemplateFunction(name string, function interface{}) {
-	tmpl = tmpl.Funcs(template.FuncMap{
-		name: function,
-	})
+	funcMap[name] = function
+	tmpl = tmpl.Funcs(funcMap)
 	// funcMap[name] = function
 }

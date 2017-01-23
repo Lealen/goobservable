@@ -151,8 +151,13 @@ func Set(name string, value interface{}) {
 		every.Index(i).Call("removeAttribute", goobProcessed)
 	}
 
+	every = js.Global.Get("document").Call("querySelectorAll", "["+goobIfVar+"='"+name+"']")
+	for i := 0; i < every.Length(); i++ {
+		every.Index(i).Call("removeAttribute", goobIfExpressionProcessed)
+	}
+
 	Tick()
-	checkExpressions(name)
+	// checkExpressions(name)
 }
 
 func GetIndex(name string, index interface{}) interface{} {

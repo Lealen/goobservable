@@ -10,16 +10,21 @@ import (
 	"github.com/gopherjs/gopherjs/js"
 )
 
-var tmpl = template.Must(template.New("").Funcs(funcMap), nil)
+var tmpl = template.New("").Funcs(funcMap)
 
 // var data interface{}
+var templatestmp = map[string]string{}
+var isrunning bool
 
 func AddTemplate(name, src string) {
-	var err error
-	tmpl, err = tmpl.New(name).Parse(src)
-	if err != nil {
-		println(err)
-		return
+	if !isrunning {
+		templatestmp[name] = src
+	} else {
+		var err error
+		tmpl, err = tmpl.New(name).Parse(src)
+		if err != nil {
+			println(err)
+		}
 	}
 }
 
@@ -29,6 +34,16 @@ func AddTemplate(name, src string) {
 
 func Run() {
 	// data = v
+	var err error
+	for k, v := range templatestmp {
+		tmpl, err = tmpl.New(k).Parse(v)
+		if err != nil {
+			println(err)
+		}
+	}
+	isrunning = true
+	templatestmp = nil
+
 	defineVariables()
 	runTemplate("main")
 	Tick()
@@ -101,7 +116,7 @@ func Tick() {
 	}
 
 	for {
-		every := js.Global.Get("document").Call("querySelectorAll", "["+goobIfExpression+"]:not(["+goobIfExpressionProcessed+"])")
+		every := js.Global.Get("document").Call("querySelectorAll", "["+goobIfVar+"]:not(["+goobIfExpressionProcessed+"])")
 		if every.Length() == 0 {
 			break
 		}

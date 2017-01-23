@@ -24,8 +24,8 @@ func getGlobalFunc() map[string]interface{} {
 
 //Generic:
 
-func logFunc(str string) string {
-	println(str)
+func logFunc(str interface{}) string {
+	println(fmt.Sprintf("%v", str))
 	return ""
 }
 
@@ -300,7 +300,7 @@ func getIndexFunc(array, index interface{}) (interface{}, error) {
 		if valueArray.Len() <= int(valueIndex.Int()) {
 			return nil, fmt.Errorf("Index out of range.")
 		}
-		return valueArray.Index(int(valueIndex.Int())), nil
+		return valueArray.Index(int(valueIndex.Int())).Interface(), nil
 	case reflect.Map:
 		return valueArray.MapIndex(valueIndex).Interface(), nil
 	default:
